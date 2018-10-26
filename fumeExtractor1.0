@@ -1,0 +1,195 @@
+/*
+ * Fume extractor controller using ATMega328P.
+ */
+
+// Libraries
+#include <Servo.h>
+
+// I/O Associations
+#define IntPin 2
+#define IntakeMotors 5
+#define ExhaustMotors 6
+#define fanPin 7
+#define intakeLED 15
+#define exhaustLED 16
+#define StopButton 17
+#define ExhaustButton 18
+#define IntakeButton 19
+
+// Enumerated Constants
+#define MOVETIME 500
+#define STOPPED 0
+#define RUNNING 1
+#define INBUTTON 0
+#define EXBUTTON 1
+#define STBUTTON 2
+
+// Booleans
+volatile bool intake = false;
+volatile bool exhaust = false;
+volatile bool switchOn = false;
+volatile bool inChangeState = false;
+volatile bool exChangeState = false;
+
+// Variables
+uint8_t fanState = 0;
+uint8_t pushedButton = 0; // 'pushedButton' must start different than 'oldPushedButton'
+uint8_t oldPushedButton = 3;  // and different than any of the defines to initially unlock semaphore
+
+// Class Instantiation
+Servo inMotors;
+Servo exMotors;
+
+void setup() 
+{
+  pinMode(IntPin, INPUT_PULLUP);
+  pinMode(StopButton, INPUT_PULLUP);
+  pinMode(ExhaustButton, INPUT_PULLUP);
+  pinMode(IntakeButton, INPUT_PULLUP);
+  pinMode(fanPin, OUTPUT);
+  pinMode(intakeLED, OUTPUT);
+  pinMode(exhaustLED, OUTPUT);
+
+  attachInterrupt(digitalPinToInterrupt(IntPin), ButtonPush, FALLING);
+
+  inMotors.attach(IntakeMotors);
+  exMotors.attach(ExhaustMotors);
+
+  digitalWrite(fanPin, LOW); // Turn off fan and LEDs
+  digitalWrite(intakeLED, LOW);
+  digitalWrite(intakeLED, LOW);
+  ZeroMotors();
+}
+
+void loop() 
+{
+  if (inChangeState)
+  {
+    if (intake)
+    {
+      inMotors.write(90);
+      delay(MOVETIME);
+
+      StartFan(fanState);
+    }
+    else
+    {
+      if (!exhaust)
+        StopFan();
+        
+      inMotors.write(0);
+      delay(MOVETIME);
+    }
+    
+    inChangeState = false;
+  }
+  
+  if (exChangeState)
+  {
+    if (exhaust)
+    {
+      exMotors.write(90);
+      delay(MOVETIME);
+
+      StartFan(fanState);
+    }
+    else
+    {
+      if (!intake)
+        StopFan();
+        
+      exMotors.write(0);
+      delay(MOVETIME);
+    }
+
+    exChangeState = false;
+  }
+}
+
+void ButtonPush(void)
+{
+  cli();
+  bool in = true;
+  bool ex = true;
+  bool st = true;
+
+  in = digitalRead(IntakeButton);
+  ex = digitalRead(ExhaustButton);
+  st = digitalRead(StopButton);
+
+  if (!in)
+    pushedButton = INBUTTON;
+  else if (!ex)
+    pushedButton = EXBUTTON;
+  else if (!st)
+    pushedButton = STBUTTON;
+
+  if (pushedButton != oldPushedButton)
+  {
+    if (!in)
+    {
+      digitalWrite(exhaustLED, LOW);
+      digitalWrite(intakeLED, HIGH);
+      inChangeState = true;
+      intake = true;
+  
+      exChangeState = true;
+      exhaust = false;
+    }
+    else if (!ex)
+    {
+      digitalWrite(intakeLED, LOW);
+      digitalWrite(exhaustLED, HIGH);
+      exChangeState = true;
+      exhaust = true;
+  
+      inChangeState = true;
+      intake = false;
+    }
+    else if (!st)
+    {
+      digitalWrite(intakeLED, LOW);
+      digitalWrite(exhaustLED, LOW);
+      inChangeState = true;
+      intake = false;
+      
+      exChangeState = true;
+      exhaust = false;
+    }
+    oldPushedButton = pushedButton;
+  }
+  sei();
+}
+
+void ZeroMotors(void)
+{
+  inMotors.write(180);
+  exMotors.write(180);
+  delay(MOVETIME);
+  inMotors.write(0);
+  exMotors.write(0);
+  delay(MOVETIME);
+}
+
+void StartFan(uint8_t state) // Simulate PWM to slowly bring up motor to prevent voltage drop due 
+{                            // to excessive current draw. This Vdrop can cause uC to reset mid operation
+  if (state == STOPPED)
+  {
+    #define unPulse 25
+    for (uint8_t pulse = 1; pulse <= 24; pulse++)
+    {
+      digitalWrite(fanPin, HIGH);
+      delay(pulse);
+      digitalWrite(fanPin, LOW);
+      delay(unPulse - pulse);
+    }
+    digitalWrite(fanPin, HIGH);
+    fanState = RUNNING;
+  }
+}
+
+void StopFan(void)
+{
+  digitalWrite(fanPin, LOW);
+  fanState = STOPPED;
+}
